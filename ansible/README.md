@@ -1,4 +1,4 @@
-##Prepare tools
+## Prepare tools
 add this lines to ansible config:
 ```bash
 gathering = smart
