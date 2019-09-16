@@ -1,0 +1,92 @@
+---
+- name: "Setup packages"
+  become: true
+  become_method: sudo
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - docker
+
+
+#- name: create a ext4 filesystem on EBS device
+#  filesystem:
+#    fstype: ext4
+#    dev: /dev/xvdf
+
+#- name: mount EBS device to /
+#  mount:
+#    path: /home/ec2-user/nexus-data
+#    src: /dev/xvdf
+#    fstype: ext4
+#    opts: noatime
+#    state: present
+
+#- name: "create path"
+#  file:
+#    path: /home/ec2-user/nexus-data
+#    state: directory
+#    mode: '0755'
+
+- name: "Setup services"
+  become: true
+  become_method: sudo
+  service:
+    name: "{{ item }}"
+    state: started
+    #enabled: yes
+  with_items:
+    - docker
+
+- name: "Setup python"
+  become: true
+  become_method: sudo
+  pip:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - docker
+
+
+- name: "prepare folder"
+  become: true
+  become_method: sudo
+  file:
+    path: /home/ec2-user/nexus-data
+    mode: '0777'
+    state: directory
+    recurse: yes
+    owner: root
+    group: root
+
+#- name: "mount EBS volume"
+#  become: true
+#  mount:
+#    path: /home/ec2-user/nexus-data 
+#    src: /dev/xvdf
+#    fstype: ext4
+#    opts: rw
+#    state: mounted
+#  register: ebs_mount
+
+
+#- name: "check"
+#  debug:
+  #    var: ebs_mount 
+
+- name: "Setup Nexus"
+  docker_container:
+    name: NexusOSS
+    image: sonatype/nexus
+    state: started
+    restart: "{{ ebs_mount.changed|default('no') }}"
+    restart_policy: unless-stopped
+    #network_mode: host
+    ports:
+      - "80:8081"
+    volumes:
+      - "/home/ec2-user/nexus-data:/sonatype-work:rw"
+    env:
+      Env: "dev"
+      NEXUS_CONTEXT: "/"
+      CONTEXT_PATH: "/"

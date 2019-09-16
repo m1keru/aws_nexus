@@ -1,0 +1,23 @@
+---
+SSH_KEY_NAME: mtiurin_aws_devops
+VPC_NAME: mtiurin-vpc
+VPC_NET: 10.1.100.0/16
+VPC_SUBNET: 10.1.100.0/24
+VPC_SUBNET2: 10.1.101.0/24
+AWS_REGION: eu-central-1
+AWS_ZONE1: eu-central-1a
+AWS_ZONE2: eu-central-1c
+SECURITY_GROUP_NAME: mtiurin_aws_devops
+EC2_INSTANCE_NAME: mtiurin_aws_devops_1
+#BASE_AMI: ami-0cfac31dd01a5f898
+BASE_AMI: ami-026d3b3672c6e7b66
+TARGET_AMI: mtiurin_aws_devops
+EC2_TYPE: t2.micro
+EC2_PUBLIC: yes
+HOME: "{{ lookup('env','HOME') }}"
+USER: "{{ lookup('env','USER') }}"
+DNS_ZONE: gridu.aws.griddynamics.net
+DNS_NAME: prexus
+EBS_VOLUME_NAME: "mtiurin_aws_ebs_vol_20g"
+ASG_NAME: "mtiurin_aws_asg"
+IAM_ROLE: ec2_full

@@ -1,0 +1,15 @@
+---
+- hosts: localhost
+  roles:
+    - { role: ec2 }
+
+
+#- hosts: tag_Name_mtiurin_aws_devops_1
+#  remote_user: ec2-user
+#  roles:
+  #    - { role: nexus, remote_user: core , ansible_ssh_user: ec2-user, become: true}
+    
+#- hosts: localhost
+#  roles:
+  #    - { role: ami }
+

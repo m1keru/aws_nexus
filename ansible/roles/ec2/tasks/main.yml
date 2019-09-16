@@ -1,0 +1,174 @@
+---
+- name: "update facts"
+  setup:
+- name: "create SSH keys"
+  ec2_key:
+    name: "{{ SSH_KEY_NAME  }}"
+    key_material: "{{ lookup('file', HOME+'/.ssh/id_rsa.pub') }}"
+  tags:
+    - ec2
+    
+- name: "Create VPC"
+  ec2_vpc_net:
+    name: "{{ VPC_NAME }}"
+    state: present
+    cidr_block: "{{ VPC_NET }}"
+    region: "{{ AWS_REGION }}"
+    tenancy: default
+  register: vpc
+  tags:
+    - ec2
+  
+- name: "Create VPC subnet"
+  ec2_vpc_subnet:
+    state: present
+    vpc_id: "{{ vpc.vpc.id }}"
+    cidr: "{{ VPC_SUBNET }}"
+    region: "{{ AWS_REGION }}"
+    az: "{{ AWS_ZONE1 }}"
+    map_public: "{{ EC2_PUBLIC }}"
+    resource_tags:
+      Name: "{{ VPC_NAME }}"
+  register: vpc_subnet
+  tags:
+    - ec2
+ 
+- name: "Create VPC subnet 2"
+  ec2_vpc_subnet:
+    state: present
+    vpc_id: "{{ vpc.vpc.id }}"
+    cidr: "{{ VPC_SUBNET2 }}"
+    region: "{{ AWS_REGION }}"
+    az: "{{ AWS_ZONE2 }}"
+    map_public: "{{ EC2_PUBLIC }}"
+    resource_tags:
+      Name: "{{ VPC_NAME }}"
+  register: vpc_subnet2
+  tags:
+    - ec2
+
+- name: "Create Internet GateWay at AWS"
+  ec2_vpc_igw:
+    vpc_id: "{{ vpc.vpc.id }}"
+    region: "{{ AWS_REGION }}"
+    state: present
+  register: igw
+  tags: 
+    - ec2 
+- name: "debug"
+  debug:
+    var: igw
+
+#- name: Create new nat gateway and allocate new EIP.
+#  ec2_vpc_nat_gateway:
+#    state: present
+#    subnet_id: "{{ vpc_subnet.subnet.id }}"
+#    wait: yes
+#    region: "{{ AWS_REGION }}"
+#  register: ngw
+
+- name: "Create Security Group"
+  ec2_group: 
+     name: "{{ SECURITY_GROUP_NAME }}"
+     description: "{{ VPC_SUBNET }} Security Group "
+     vpc_id: "{{ vpc.vpc.id  }}"
+     region: "{{ AWS_REGION }}"
+     rules:
+       - proto: tcp
+         ports:
+           - 80
+           - 8081
+           - 8080
+           - 22
+         cidr_ip: 0.0.0.0/0 
+         rule_desc: "Allow Nexus"
+     state: present
+
+
+
+- name: "Create Instances"
+  ec2_instance:
+    state: "{{ cluster_state|default('present') }}"
+    name: "{{ item.name }}"
+    key_name: "{{ SSH_KEY_NAME }}"
+    vpc_subnet_id: "{{ vpc_subnet.subnet.id }}"
+    instance_type: "{{ item.instance_type }}"
+    instance_role: "{{ IAM_ROLE }}"
+    security_group: "{{ SECURITY_GROUP_NAME }}"
+    network:
+      assign_public_ip: "{{ item.public }}"
+    image_id: "{{ BASE_AMI }}"
+    tags:
+      Name: "{{ EC2_INSTANCE_NAME }}"
+  with_items:
+    - {name: "{{ EC2_INSTANCE_NAME }}", instance_type: "{{ EC2_TYPE }}", public: "{{ EC2_PUBLIC }}" }
+  register: ec2
+  tags:
+    - ec2
+
+
+- name: Set up public subnet route table
+  ec2_vpc_route_table:
+    vpc_id: "{{ vpc.vpc.id }}"
+    region: "{{ AWS_REGION }}"
+    tags:
+      Name: Public
+    subnets:
+      - "{{ vpc_subnet.subnet.id }}"
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ igw.gateway_id }}"
+  loop: "{{ ec2.results[0].instances }}"
+  register: public_route_table
+
+
+
+#- name: "Create EBS"
+#  ec2_vol:
+#    instance: "{{ item.instance_id }}"
+#    volume_size: 20
+#    volume_type: gp2
+#    name: "{{ EBS_VOLUME_NAME }}"
+#    device_name: /dev/xvdf
+#  loop: "{{ ec2.results[0].instances }}"
+#  register: ec2_vol
+#  when:  cluster_state|default('present')  != 'absent' 
+
+
+#- name: "Create Auto Scaling Group Config"
+#  ec2_lc:
+#    name: asg_config
+#    instance_id: "{{ item.instance_id }}"
+#    key_name: "{{ SSH_KEY_NAME }}" 
+#    security_groups: ["{{ SECURITY_GROUP_NAME }}"]
+#  loop: "{{ ec2.results[0].instances }}"
+#
+#- name: "Create ASG"
+#  ec2_asg:
+#    name: "{{ ASG_NAME }}"
+#    launch_config_name: asg_config
+#    health_check_period: 60
+#    health_check_type: EC2
+#    replace_all_instances: yes
+#    min_size: 1
+#    max_size: 1
+#    desired_capacity: 1
+#    region: "{{ AWS_REGION }}"
+
+
+- name: "set facts"
+  set_fact:
+    ec2: "{{ ec2 }}"
+#    ec2_vol: "{{ ec2_vol }}"
+    vpc: "{{ vpc }}"
+    vpc_subnet: "{{ vpc_subnet }}"
+    vpc_subnet: "{{ vpc_subnet2 }}"
+    cacheable: yes
+  
+- name: "update dynamic inventory cache"
+  shell: ./aws --refresh-cache
+  delegate_to: 127.0.0.1
+
+- name: "Wait for a while"
+  pause:
+    minutes: 1

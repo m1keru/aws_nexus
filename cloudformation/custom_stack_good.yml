@@ -1,0 +1,322 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  AWS GridU Course Template
+
+Parameters:
+   AMI:                                                                                                                                                                              
+    Type: 'String'                                                                                                                                                                
+    Description: AMI ID                                                                                                                          
+    ConstraintDescription: take from ansible job
+
+Resources:
+  mtiurinvpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsHostnames: "true"
+      EnableDnsSupport: "true"
+      InstanceTenancy: "default"
+      Tags:
+        - Key: owner 
+          Value: mtiurin_cf_auto
+  mtiurinvpcsubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: "mtiurinvpc"
+      CidrBlock: 10.1.100.0/24
+      AvailabilityZone: "eu-central-1a"
+      Tags:
+      - Key: mtiurin_cf_auto
+        Value: yep
+  mtiurinvpcsubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: "mtiurinvpc"
+      CidrBlock: 10.1.101.0/24
+      AvailabilityZone: "eu-central-1b"
+      Tags:
+      - Key: mtiurin_cf_auto
+        Value: yep
+  mtiurinvpcsubnetpublic:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: "mtiurinvpc"
+      CidrBlock: 10.1.102.0/24
+      AvailabilityZone: "eu-central-1b"
+      MapPublicIpOnLaunch: 'true'
+      Tags:
+      - Key: public network
+        Value: yep
+
+  LaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties: 
+      InstanceMonitoring: "false"
+      KeyName: "mtiurin_aws_devops"
+      #AssociatePublicIpAddress: "true"
+      ImageId: 
+        Ref: "AMI"
+      InstanceType: "t2.micro"
+      SecurityGroups: 
+        - Ref: "mtiurinSecurityGroup"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          docker stop NexusOSS
+          yum install -y nfs-utils
+          echo "${FileSystem}.efs.${AWS::Region}.amazonaws.com:/ /home/ec2-user/nexus-data nfs nfsvers=4.1,rw,async,auto,user 0 0" >> /etc/fstab
+          #sleep 60 
+          #mount -t nfs4 -o nfsvers=4.1,timeo=60000,rw,async,auto,user  ${FileSystem}.efs.${AWS::Region}.amazonaws.com:/ /home/ec2-user/nexus-data
+          mount -a
+          chmod 0777 /home/ec2-user/nexus-data
+          docker restart NexusOSS
+  mtiurinASGroup: 
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+        - MountTarget
+        - MountTarget2
+    Properties: 
+      AvailabilityZones:
+        - "eu-central-1a"
+        - "eu-central-1b" 
+      LaunchConfigurationName: 
+        Ref: "LaunchConfig"
+      MaxSize: "1"
+      MinSize: "1"
+      DesiredCapacity: "1"
+      VPCZoneIdentifier:
+        - Ref: "mtiurinvpcsubnet1"
+        - Ref: "mtiurinvpcsubnet2"
+      TargetGroupARNs:
+        - Ref: "LBTargetGroup"
+  mtiurinSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http and ssh to client host
+      VpcId:
+         Ref: "mtiurinvpc"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        ToPort: '2049'
+        FromPort: '2049'
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        ToPort: '2049'
+        FromPort: '2049'
+        CidrIp: 0.0.0.0/0
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: "mtiurinvpc"
+      InternetGatewayId:
+        Ref: "InternetGateway"
+
+  RouteTable:                                                                                                                                                                                 
+    Type: 'AWS::EC2::RouteTable'                                                                                                                                                             
+    Properties:                                                                                                                                                                              
+      VpcId: 
+        Ref: "mtiurinvpc"
+
+  SubnetRouteTableAssociationPublic:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: "mtiurinvpcsubnetpublic"
+      RouteTableId:
+        Ref: "RouteTable"
+
+  Route:                                                                                                                                                                                  
+    Type: 'AWS::EC2::Route'                                                                                                                                                                  
+    Properties:                                                                                                                                                                              
+      RouteTableId:
+        Ref: "RouteTable"                                                                                                                                                           
+      DestinationCidrBlock: 0.0.0.0/0                                                                                                                                                        
+      GatewayId:
+        Ref: "InternetGateway"
+### NAT
+  NAT:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId:
+          Fn::GetAtt:
+          - EIP
+          - AllocationId
+      SubnetId:
+        Ref: "mtiurinvpcsubnetpublic"
+
+  EIP:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  NatRouteTable1:
+    Type: 'AWS::EC2::RouteTable'                                                                                                                                                             
+    Properties:                                                                                                                                                                              
+      VpcId: 
+        Ref: "mtiurinvpc"
+
+  NatRouteTable2:
+    Type: 'AWS::EC2::RouteTable'                                                                                                                                                             
+    Properties:                                                                                                                                                                              
+      VpcId: 
+        Ref: "mtiurinvpc"
+
+
+  NatRoute1:                                                                                                                                                                                  
+    Type: 'AWS::EC2::Route'                                                                                                                                                                  
+    Properties:                                                                                                                                                                              
+      RouteTableId:
+        Ref: "NatRouteTable1"                                                                                                                                                           
+      DestinationCidrBlock: 0.0.0.0/0                                                                                                                                                        
+      NatGatewayId:
+        Ref: "NAT"
+  NatRoute2:                                                                                                                                                                                  
+    Type: 'AWS::EC2::Route'                                                                                                                                                                  
+    Properties:                                                                                                                                                                              
+      RouteTableId:
+        Ref: "NatRouteTable2"                                                                                                                                                           
+      DestinationCidrBlock: 0.0.0.0/0                                                                                                                                                        
+      NatGatewayId:
+        Ref: "NAT"
+
+
+  SubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: "mtiurinvpcsubnet1"
+      RouteTableId:
+        Ref: "NatRouteTable1"
+  SubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: "mtiurinvpcsubnet2"
+      RouteTableId:
+        Ref: "NatRouteTable2"
+
+
+
+  
+
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      FileSystemTags:
+      - Key: Name
+        Value: "EFS"
+  MountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        Ref: FileSystem
+      SubnetId:
+        Ref: "mtiurinvpcsubnet1"
+      SecurityGroups:
+      - Ref: "mtiurinSecurityGroup"
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        Ref: FileSystem
+      SubnetId:
+        Ref: "mtiurinvpcsubnet2"
+      SecurityGroups:
+      - Ref: "mtiurinSecurityGroup"
+
+  ElasticLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: network
+      Scheme: 'internal'
+      Name: 'nexus'
+      Subnets:
+        - Ref: "mtiurinvpcsubnet1"
+        - Ref: "mtiurinvpcsubnet2"
+  NLBListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref LBTargetGroup
+      LoadBalancerArn: !Ref ElasticLoadBalancer
+      Port: '80'
+      Protocol: TCP
+  LBTargetGroup:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      Port: 80
+      Protocol: TCP
+      UnhealthyThresholdCount: 3
+      VpcId: 
+        Ref: "mtiurinvpc" 
+  SSHVPNInstance: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: "ami-00aa4671cbf840d82"
+      KeyName: "mtiurin_aws_devops"
+      InstanceType: "t2.micro"
+      AvailabilityZone: "eu-central-1b"
+      Tenancy: default
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+          sysctl -p /etc/sysctl.conf
+      NetworkInterfaces:  
+        - AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+          DeviceIndex: 0 
+          SubnetId: 
+              Ref: "mtiurinvpcsubnetpublic"
+          GroupSet:
+              - Ref: "mtiurinSecurityGroup"
+    DependsOn: 
+      - mtiurinvpcsubnet1
+      - mtiurinvpcsubnet2
+      - mtiurinvpcsubnetpublic
+
+Outputs:
+  URL:
+    Description: URL of the website
+    Value: !Join ['', ['http://', !GetAtt [ElasticLoadBalancer, DNSName]]]
+  SSHVPNIP:
+    Description: IP of SSH proxy 'sshuttle --dns -r ec2-user@{{IP}} {{IP}} -x  0/0 || true'
+    Value: !GetAtt [SSHVPNInstance , PublicIp]

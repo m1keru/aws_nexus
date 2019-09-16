@@ -1,0 +1,47 @@
+- name: gather facts about an AMIs
+  ec2_ami_facts:
+    filters:
+      name: "{{ TARGET_AMI }}"
+  register: ami
+
+
+- name: "debug vpc"
+  debug:  
+    var: ami
+    verbosity: 4
+
+
+- name: "delete AMI if it exists"
+  ec2_ami:
+    image_id: "{{ item.image_id }}"
+    wait: yes
+    state: absent
+  with_items: "{{ ami.images }}"
+
+
+
+- name: "create AMI from Instances"
+  ec2_ami:
+    instance_id: "{{ item.instance_id }}"
+    wait: yes
+    name: "{{ TARGET_AMI }}"
+  loop: "{{ ec2.results[0].instances }}"
+  register: ami
+  when: ec2 is defined
+
+- name: "NEW AMI IMAGE:"
+  debug:
+    var: ami
+
+- name: "Destroy Instances"
+  ec2_instance:
+    state: "terminated"
+    filters:
+      key_name: mtiurin_aws_devops 
+  tags:
+    - ec2_destroy
+
+#- ec2_instance:
+#    state: absent
+#  filters:
+#    instance-state-name: running
