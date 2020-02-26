@@ -31,7 +31,7 @@
 
 - name: "NEW AMI IMAGE:"
   debug:
-    var: ami
+    var: ami.results[0].image_id
 
 - name: "Destroy Instances"
   ec2_instance:
